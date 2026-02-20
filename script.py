@@ -55,10 +55,11 @@ def analyse_sentiment(text):
             "role": "user",
             "content": (
                 f"Analyse this LinkedIn comment about HubSpot. "
-                f"Reply with JSON only, no explanation, no markdown:\n"
+                f"Reply with JSON only, no explanation, no markdown, "
+                f"no quotes inside string values:\n"
                 f"{{\n"
                 f'  "sentiment": "positive" or "neutral" or "negative",\n'
-                f'  "pain_point": "one sentence summary of the complaint or null if none"\n'
+                f'  "pain_point": "one sentence summary of complaint or null if none"\n'
                 f"}}\n\n"
                 f"Comment: {text}"
             )
@@ -70,24 +71,40 @@ def analyse_sentiment(text):
         result = json.loads(raw)
         return result.get("sentiment", "neutral"), result.get("pain_point", "") or ""
     except Exception as e:
-        print(f"Sentiment analysis failed: {e}")
-        print(f"Raw response was: {message.content[0].text[:200]}")
-        return "neutral", ""
+        # Fallback: extract values with regex if JSON parsing fails
+        try:
+            raw = message.content[0].text.strip()
+            sentiment = re.search(r'"sentiment"\s*:\s*"(\w+)"', raw)
+            pain_point = re.search(r'"pain_point"\s*:\s*"([^"]*)"', raw)
+            return (
+                sentiment.group(1) if sentiment else "neutral",
+                pain_point.group(1) if pain_point else ""
+            )
+        except:
+            print(f"Sentiment analysis failed: {e}")
+            print(f"Raw response was: {message.content[0].text[:200]}")
+            return "neutral", ""
 
 # ── Extract commenter details ─────────────────────────────────────────────────
 def get_commenter_details(comment):
+    # Debug: print raw comment structure once
+    if not hasattr(get_commenter_details, "_debugged"):
+        print(f"DEBUG comment keys: {list(comment.keys())}")
+        print(f"DEBUG comment sample: {json.dumps(comment, default=str)[:800]}")
+        get_commenter_details._debugged = True
+
     name    = comment.get("commenter_name", "") or ""
     title   = comment.get("commenter_title", "") or ""
     company = ""
 
-    # Company can be nested in employer or default_position
+    # Try direct field first
     employer = comment.get("default_position_company_name", "")
     if employer:
         company = employer
     else:
+        # Try nested employer list
         employers = comment.get("employer", [])
         if employers and isinstance(employers, list):
-            # Get current employer (no end date)
             for emp in employers:
                 if emp.get("end_date") is None:
                     company = emp.get("company_name", "")
@@ -197,9 +214,8 @@ def run_profile_posts():
 
     return rows
 
-# ── Write to Sheets ───────────────────────────────────────────────────────────
+# ── Write latest (overwrite) ──────────────────────────────────────────────────
 def write_latest(tab_name, rows):
-    """Overwrite tab with today's data only."""
     ws = get_sheet(tab_name)
     ws.clear()
     time.sleep(1)
@@ -212,8 +228,8 @@ def write_latest(tab_name, rows):
         time.sleep(2)
     print(f"✓ '{tab_name}' updated — {len(rows)} rows")
 
+# ── Write archive (append only) ───────────────────────────────────────────────
 def write_archive(tab_name, rows):
-    """Append today's data to archive tab, never clear."""
     ws = get_sheet(tab_name)
     existing = ws.get_all_values()
     if not existing:
