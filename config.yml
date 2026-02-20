@@ -10,6 +10,6 @@ crustdata:
   profile_posts_limit: 5         # recent posts to fetch per profile
 
 google_sheets:
-  spreadsheet_id: "1cClNTDm-VlLeZmbO6qAg52cO1GAV_1lp8MH0lJoIF_s"
+  spreadsheet_id: "11kQchHbp88XcWRvm4SETSVvD3SdWtpChAq7qS9aI1l8"
   keyword_tab: "Keyword Intel"
   profile_tab: "Profile Posts"
