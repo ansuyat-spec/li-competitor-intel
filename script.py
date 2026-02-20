@@ -45,8 +45,24 @@ def get_sheet(tab_name):
         worksheet = sh.add_worksheet(title=tab_name, rows="5000", cols="20")
     return worksheet
 
+# ── Load keywords and profiles from Config tab ────────────────────────────────
+def load_config_from_sheets():
+    print("Loading keywords and profiles from Config tab...")
+    ws = get_sheet(config["google_sheets"]["config_tab"])
+    rows = ws.get_all_values()
+    keywords = []
+    profiles = []
+    for row in rows[1:]:  # skip header row
+        if len(row) > 0 and row[0].strip():
+            keywords.append(row[0].strip())
+        if len(row) > 1 and row[1].strip():
+            profiles.append(row[1].strip())
+    print(f"Found {len(keywords)} keywords: {keywords}")
+    print(f"Found {len(profiles)} profiles: {profiles}")
+    return keywords, profiles
+
 # ── Sentiment via Claude ──────────────────────────────────────────────────────
-def analyse_sentiment(text):
+def analyse_sentiment(text, keyword="HubSpot"):
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     message = client.messages.create(
         model="claude-3-haiku-20240307",
@@ -54,7 +70,7 @@ def analyse_sentiment(text):
         messages=[{
             "role": "user",
             "content": (
-                f"Analyse this LinkedIn comment about HubSpot. "
+                f"Analyse this LinkedIn comment about {keyword}. "
                 f"Reply with JSON only, no explanation, no markdown, "
                 f"no quotes inside string values:\n"
                 f"{{\n"
@@ -71,7 +87,6 @@ def analyse_sentiment(text):
         result = json.loads(raw)
         return result.get("sentiment", "neutral"), result.get("pain_point", "") or ""
     except Exception as e:
-        # Fallback: extract values with regex if JSON parsing fails
         try:
             raw = message.content[0].text.strip()
             sentiment = re.search(r'"sentiment"\s*:\s*"(\w+)"', raw)
@@ -94,7 +109,6 @@ def get_commenter_details(comment):
     headline = details.get("headline", "") or ""
     company  = ""
 
-    # Get company from employer list
     employers = details.get("employer", [])
     if employers and isinstance(employers, list):
         for emp in employers:
@@ -104,14 +118,13 @@ def get_commenter_details(comment):
         if not company and employers:
             company = employers[0].get("company_name", "")
 
-    # Use headline as fallback for title
     if not title and headline:
         title = headline
 
     return name, title, company
 
 # ── Build a row ───────────────────────────────────────────────────────────────
-def build_row(source, post, comment=None):
+def build_row(source, post, keyword="", comment=None):
     post_text   = post.get("text", "")
     post_url    = post.get("share_url", "")
     author      = post.get("actor_name", "")
@@ -121,7 +134,7 @@ def build_row(source, post, comment=None):
     if comment:
         comment_text = comment.get("comment_text", "")
         commenter_name, commenter_title, commenter_company = get_commenter_details(comment)
-        sentiment, pain_point = analyse_sentiment(comment_text)
+        sentiment, pain_point = analyse_sentiment(comment_text, keyword)
         return [
             run_date, source, author, date_posted,
             post_url, post_text[:500], comment_text[:300],
@@ -129,7 +142,7 @@ def build_row(source, post, comment=None):
             sentiment, pain_point
         ]
     else:
-        sentiment, pain_point = analyse_sentiment(post_text)
+        sentiment, pain_point = analyse_sentiment(post_text, keyword)
         return [
             run_date, source, author, date_posted,
             post_url, post_text[:500], "",
@@ -138,48 +151,54 @@ def build_row(source, post, comment=None):
         ]
 
 # ── Use Case 2: Keyword search ────────────────────────────────────────────────
-def run_keyword_search():
+def run_keyword_search(keywords):
     print("Running keyword search...")
     cfg = config["crustdata"]
-    payload = {
-        "keyword": cfg["keyword"],
-        "date_posted": cfg["date_posted"],
-        "limit": cfg["max_posts"],
-        "fields": "comments",
-        "max_comments": cfg["max_comments"]
-    }
-    resp = requests.post(
-        "https://api.crustdata.com/screener/linkedin_posts/keyword_search/",
-        headers=HEADERS,
-        json=payload
-    )
-    if resp.status_code != 200:
-        print(f"Keyword search failed: {resp.status_code} {resp.text}")
-        return []
+    all_rows = []
 
-    response = resp.json()
-    posts = response if isinstance(response, list) else response.get("posts", [])
-    rows = []
+    for keyword in keywords:
+        print(f"  Searching for: {keyword}")
+        payload = {
+            "keyword": keyword,
+            "date_posted": cfg["date_posted"],
+            "limit": cfg["max_posts"],
+            "fields": "comments",
+            "max_comments": cfg["max_comments"]
+        }
+        resp = requests.post(
+            "https://api.crustdata.com/screener/linkedin_posts/keyword_search/",
+            headers=HEADERS,
+            json=payload
+        )
+        if resp.status_code != 200:
+            print(f"  Keyword search failed for '{keyword}': {resp.status_code} {resp.text}")
+            continue
 
-    for post in posts:
-        comments = post.get("comments", [])
-        if not comments:
-            rows.append(build_row(cfg["keyword"], post))
-        else:
-            for comment in comments:
-                if not comment.get("comment_text", ""):
-                    continue
-                rows.append(build_row(cfg["keyword"], post, comment))
+        response = resp.json()
+        posts = response if isinstance(response, list) else response.get("posts", [])
 
-    return rows
+        for post in posts:
+            comments = post.get("comments", [])
+            if not comments:
+                all_rows.append(build_row(keyword, post, keyword))
+            else:
+                for comment in comments:
+                    if not comment.get("comment_text", ""):
+                        continue
+                    all_rows.append(build_row(keyword, post, keyword, comment))
+
+        print(f"  Got {len(posts)} posts for '{keyword}'")
+
+    return all_rows
 
 # ── Use Case 1: Profile posts ─────────────────────────────────────────────────
-def run_profile_posts():
+def run_profile_posts(profiles):
     print("Running profile posts fetch...")
     cfg = config["crustdata"]
     rows = []
 
-    for profile_url in cfg["profiles"]:
+    for profile_url in profiles:
+        print(f"  Fetching: {profile_url}")
         params = {
             "person_linkedin_url": profile_url,
             "limit": cfg["profile_posts_limit"],
@@ -192,7 +211,7 @@ def run_profile_posts():
             params=params
         )
         if resp.status_code != 200:
-            print(f"Profile fetch failed for {profile_url}: {resp.status_code} {resp.text}")
+            print(f"  Profile fetch failed for {profile_url}: {resp.status_code} {resp.text}")
             continue
 
         response = resp.json()
@@ -206,7 +225,9 @@ def run_profile_posts():
                 for comment in comments:
                     if not comment.get("comment_text", ""):
                         continue
-                    rows.append(build_row(profile_url, post, comment))
+                    rows.append(build_row(profile_url, post, "", comment))
+
+        print(f"  Got {len(posts)} posts for {profile_url}")
 
     return rows
 
@@ -241,22 +262,35 @@ def write_archive(tab_name, rows):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    # Load keywords and profiles from Google Sheet Config tab
+    keywords, profiles = load_config_from_sheets()
+
+    if not keywords and not profiles:
+        print("No keywords or profiles found in Config tab. Please add some and re-run.")
+        exit(1)
+
     # Use Case 2 — Keyword Intel
-    print("=== Use Case 2: Keyword Intel ===")
-    keyword_rows = run_keyword_search()
-    if keyword_rows:
-        write_latest(config["google_sheets"]["keyword_tab"], keyword_rows)
-        write_archive(config["google_sheets"]["keyword_archive_tab"], keyword_rows)
+    if keywords:
+        print("=== Use Case 2: Keyword Intel ===")
+        keyword_rows = run_keyword_search(keywords)
+        if keyword_rows:
+            write_latest(config["google_sheets"]["keyword_tab"], keyword_rows)
+            write_archive(config["google_sheets"]["keyword_archive_tab"], keyword_rows)
+        else:
+            print("No keyword rows to write.")
     else:
-        print("No keyword rows to write.")
+        print("No keywords found in Config tab — skipping keyword search.")
 
     # Use Case 1 — Profile Posts
-    print("=== Use Case 1: Profile Posts ===")
-    profile_rows = run_profile_posts()
-    if profile_rows:
-        write_latest(config["google_sheets"]["profile_tab"], profile_rows)
-        write_archive(config["google_sheets"]["profile_archive_tab"], profile_rows)
+    if profiles:
+        print("=== Use Case 1: Profile Posts ===")
+        profile_rows = run_profile_posts(profiles)
+        if profile_rows:
+            write_latest(config["google_sheets"]["profile_tab"], profile_rows)
+            write_archive(config["google_sheets"]["profile_archive_tab"], profile_rows)
+        else:
+            print("No profile rows to write.")
     else:
-        print("No profile rows to write.")
+        print("No profiles found in Config tab — skipping profile posts.")
 
     print("=== All done! ===")
