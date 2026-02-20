@@ -1,0 +1,15 @@
+crustdata:
+  keyword: "HubSpot"
+  date_posted: "past-24h"        # options: past-24h, past-week, past-month, past-quarter, past-year
+  max_comments: 50               # comments to fetch per post
+  max_posts: 10                  # posts to fetch per keyword search
+
+  profiles:
+    - https://www.linkedin.com/in/yaminirangan/
+    - https://www.linkedin.com/in/dharmesh/
+  profile_posts_limit: 5         # recent posts to fetch per profile
+
+google_sheets:
+  spreadsheet_id: "1cClNTDm-VlLeZmbO6qAg52cO1GAV_1lp8MH0lJoIF_s"
+  keyword_tab: "Keyword Intel"
+  profile_tab: "Profile Posts"
