@@ -1,13 +1,13 @@
 crustdata:
   keyword: "HubSpot"
-  date_posted: "past-24h"        # options: past-24h, past-week, past-month, past-quarter, past-year
-  max_comments: 50               # comments to fetch per post
-  max_posts: 10                  # posts to fetch per keyword search
+  date_posted: "past-24h"
+  max_comments: 50
+  max_posts: 10
 
   profiles:
     - https://www.linkedin.com/in/yaminirangan/
     - https://www.linkedin.com/in/dharmesh/
-  profile_posts_limit: 5         # recent posts to fetch per profile
+  profile_posts_limit: 5
 
 google_sheets:
   spreadsheet_id: "11kQchHbp88XcWRvm4SETSVvD3SdWtpChAq7qS9aI1l8"
