@@ -1,0 +1,28 @@
+name: LinkedIn Competitor Intel
+
+on:
+  schedule:
+    - cron: '30 0 * * *'   # 6:00 AM IST daily
+  workflow_dispatch:         # also lets you trigger manually with a button click
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests anthropic gspread google-auth pyyaml
+
+      - name: Run script
+        env:
+          CRUSTDATA_API_KEY: ${{ secrets.CRUSTDATA_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python script.py
