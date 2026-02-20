@@ -82,7 +82,9 @@ def run_keyword_search():
         print(f"Keyword search failed: {resp.status_code} {resp.text}")
         return []
 
-    posts = resp.json().get("posts", [])
+    response = resp.json()
+posts = response if isinstance(response, list) else response.get("posts", [])
+
     rows = []
     for post in posts:
         post_text   = post.get("text", "")
@@ -144,7 +146,9 @@ def run_profile_posts():
             print(f"Profile fetch failed for {profile_url}: {resp.status_code}")
             continue
 
-        posts = resp.json().get("posts", [])
+        response = resp.json()
+posts = response if isinstance(response, list) else response.get("posts", [])
+
         for post in posts:
             post_text   = post.get("text", "")
             post_url    = post.get("share_url", "")
