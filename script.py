@@ -4,6 +4,8 @@ import requests
 import anthropic
 import gspread
 import json
+import time
+import re
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
@@ -46,7 +48,7 @@ def analyse_sentiment(comment_text):
             "role": "user",
             "content": (
                 f"Analyse this LinkedIn comment about HubSpot. "
-                f"Reply with JSON only, no explanation:\n"
+                f"Reply with JSON only, no explanation, no markdown:\n"
                 f"{{\n"
                 f'  "sentiment": "positive" or "neutral" or "negative",\n'
                 f'  "pain_point": "one sentence summary of the complaint or null if none"\n'
@@ -56,10 +58,14 @@ def analyse_sentiment(comment_text):
         }]
     )
     try:
-        result = json.loads(message.content[0].text)
-        return result.get("sentiment", "neutral"), result.get("pain_point", "")
+        raw = message.content[0].text.strip()
+        # Strip markdown code blocks if present
+        raw = re.sub(r"```json|```", "", raw).strip()
+        result = json.loads(raw)
+        return result.get("sentiment", "neutral"), result.get("pain_point", "") or ""
     except Exception as e:
         print(f"Sentiment analysis failed: {e}")
+        print(f"Raw response was: {message.content[0].text[:200]}")
         return "neutral", ""
 
 # ── Use Case 2: Keyword search ────────────────────────────────────────────────
@@ -191,14 +197,22 @@ def run_profile_posts():
 
     return rows
 
-# ── Write to Sheets ───────────────────────────────────────────────────────────
+# ── Write to Sheets (with rate limit handling) ────────────────────────────────
 def write_to_sheet(tab_name, headers, rows):
     ws = get_sheet(tab_name)
     ws.clear()
+    time.sleep(1)
     ws.append_row(headers, value_input_option="RAW")
-    for row in rows:
-        ws.append_row(row, value_input_option="RAW")
-    print(f"Written {len(rows)} rows to '{tab_name}'")
+
+    # Write in batches of 10 rows with a pause between batches
+    batch_size = 10
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i:i + batch_size]
+        ws.append_rows(batch, value_input_option="RAW")
+        print(f"Written rows {i+1} to {i+len(batch)} of {len(rows)}")
+        time.sleep(2)  # pause to avoid hitting Google Sheets rate limit
+
+    print(f"Done writing '{tab_name}' — {len(rows)} rows total")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -228,4 +242,4 @@ if __name__ == "__main__":
     else:
         print("No profile rows to write.")
 
-    print("=== Done! ===")
+    print("=== All done! ===")
