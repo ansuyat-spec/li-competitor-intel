@@ -2,8 +2,8 @@ name: LinkedIn Competitor Intel
 
 on:
   schedule:
-    - cron: '30 0 * * *'   # 6:00 AM IST daily
-  workflow_dispatch:         # also lets you trigger manually with a button click
+    - cron: '30 0 * * *'    # 6:00 AM IST daily
+  workflow_dispatch:          # manual trigger button in GitHub Actions
 
 jobs:
   run-script:
