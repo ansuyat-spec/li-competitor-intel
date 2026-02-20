@@ -90,7 +90,7 @@ def get_commenter_details(comment):
     # Debug: print raw comment structure once
     if not hasattr(get_commenter_details, "_debugged"):
         print(f"DEBUG comment keys: {list(comment.keys())}")
-        print(f"DEBUG comment sample: {json.dumps(comment, default=str)[:800]}")
+        print(f"DEBUG comment sample: {json.dumps(comment, default=str)[:2000]}")
         get_commenter_details._debugged = True
 
     name    = comment.get("commenter_name", "") or ""
