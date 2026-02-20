@@ -87,30 +87,26 @@ def analyse_sentiment(text):
 
 # ── Extract commenter details ─────────────────────────────────────────────────
 def get_commenter_details(comment):
-    # Debug: print raw comment structure once
-    if not hasattr(get_commenter_details, "_debugged"):
-        print(f"DEBUG comment keys: {list(comment.keys())}")
-        print(f"DEBUG comment sample: {json.dumps(comment, default=str)[:2000]}")
-        get_commenter_details._debugged = True
+    details  = comment.get("commenter_details", {}) or {}
 
-    name    = comment.get("commenter_name", "") or ""
-    title   = comment.get("commenter_title", "") or ""
-    company = ""
+    name     = details.get("name", "") or ""
+    title    = details.get("default_position_title", "") or ""
+    headline = details.get("headline", "") or ""
+    company  = ""
 
-    # Try direct field first
-    employer = comment.get("default_position_company_name", "")
-    if employer:
-        company = employer
-    else:
-        # Try nested employer list
-        employers = comment.get("employer", [])
-        if employers and isinstance(employers, list):
-            for emp in employers:
-                if emp.get("end_date") is None:
-                    company = emp.get("company_name", "")
-                    break
-            if not company and employers:
-                company = employers[0].get("company_name", "")
+    # Get company from employer list
+    employers = details.get("employer", [])
+    if employers and isinstance(employers, list):
+        for emp in employers:
+            if emp.get("end_date") is None:
+                company = emp.get("company_name", "")
+                break
+        if not company and employers:
+            company = employers[0].get("company_name", "")
+
+    # Use headline as fallback for title
+    if not title and headline:
+        title = headline
 
     return name, title, company
 
