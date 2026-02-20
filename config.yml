@@ -12,4 +12,6 @@ crustdata:
 google_sheets:
   spreadsheet_id: "11kQchHbp88XcWRvm4SETSVvD3SdWtpChAq7qS9aI1l8"
   keyword_tab: "Keyword Intel"
+  keyword_archive_tab: "Keyword Intel Archive"
   profile_tab: "Profile Posts"
+  profile_archive_tab: "Profile Posts Archive"
