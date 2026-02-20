@@ -3,6 +3,7 @@ import yaml
 import requests
 import anthropic
 import gspread
+import json
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
@@ -21,8 +22,6 @@ HEADERS = {
 }
 
 # ── Google Sheets setup ───────────────────────────────────────────────────────
-import json, tempfile
-
 def get_sheet(tab_name):
     creds_dict = json.loads(GOOGLE_CREDS)
     creds = Credentials.from_service_account_info(
@@ -49,7 +48,7 @@ def analyse_sentiment(comment_text):
                 f"Analyse this LinkedIn comment about HubSpot. "
                 f"Reply with JSON only, no explanation:\n"
                 f"{{\n"
-                f'  "sentiment": "positive" | "neutral" | "negative",\n'
+                f'  "sentiment": "positive" or "neutral" or "negative",\n'
                 f'  "pain_point": "one sentence summary of the complaint or null if none"\n'
                 f"}}\n\n"
                 f"Comment: {comment_text}"
@@ -59,7 +58,8 @@ def analyse_sentiment(comment_text):
     try:
         result = json.loads(message.content[0].text)
         return result.get("sentiment", "neutral"), result.get("pain_point", "")
-    except:
+    except Exception as e:
+        print(f"Sentiment analysis failed: {e}")
         return "neutral", ""
 
 # ── Use Case 2: Keyword search ────────────────────────────────────────────────
@@ -83,9 +83,9 @@ def run_keyword_search():
         return []
 
     response = resp.json()
-posts = response if isinstance(response, list) else response.get("posts", [])
-
+    posts = response if isinstance(response, list) else response.get("posts", [])
     rows = []
+
     for post in posts:
         post_text   = post.get("text", "")
         post_url    = post.get("share_url", "")
@@ -102,7 +102,7 @@ posts = response if isinstance(response, list) else response.get("posts", [])
                 date_posted,
                 post_text[:500],
                 post_url,
-                "",           # no comment
+                "",
                 sentiment,
                 pain_point
             ])
@@ -123,6 +123,7 @@ posts = response if isinstance(response, list) else response.get("posts", [])
                     sentiment,
                     pain_point
                 ])
+
     return rows
 
 # ── Use Case 1: Profile posts ─────────────────────────────────────────────────
@@ -130,6 +131,7 @@ def run_profile_posts():
     print("Running profile posts fetch...")
     cfg = config["crustdata"]
     rows = []
+
     for profile_url in cfg["profiles"]:
         params = {
             "person_linkedin_url": profile_url,
@@ -143,11 +145,11 @@ def run_profile_posts():
             params=params
         )
         if resp.status_code != 200:
-            print(f"Profile fetch failed for {profile_url}: {resp.status_code}")
+            print(f"Profile fetch failed for {profile_url}: {resp.status_code} {resp.text}")
             continue
 
         response = resp.json()
-posts = response if isinstance(response, list) else response.get("posts", [])
+        posts = response if isinstance(response, list) else response.get("posts", [])
 
         for post in posts:
             post_text   = post.get("text", "")
@@ -167,6 +169,7 @@ posts = response if isinstance(response, list) else response.get("posts", [])
                 post.get("total_reactions", 0),
                 post.get("total_comments", 0)
             ])
+
     return rows
 
 # ── Write to Sheets ───────────────────────────────────────────────────────────
@@ -182,21 +185,29 @@ def write_to_sheet(tab_name, headers, rows):
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     # Use Case 2 — Keyword Intel
+    print("=== Use Case 2: Keyword Intel ===")
     keyword_rows = run_keyword_search()
-    write_to_sheet(
-        config["google_sheets"]["keyword_tab"],
-        ["Run Date", "Keyword", "Post Author", "Post Date",
-         "Post Text", "Post URL", "Comment", "Sentiment", "Pain Point"],
-        keyword_rows
-    )
+    if keyword_rows:
+        write_to_sheet(
+            config["google_sheets"]["keyword_tab"],
+            ["Run Date", "Keyword", "Post Author", "Post Date",
+             "Post Text", "Post URL", "Comment", "Sentiment", "Pain Point"],
+            keyword_rows
+        )
+    else:
+        print("No keyword rows to write.")
 
     # Use Case 1 — Profile Posts
+    print("=== Use Case 1: Profile Posts ===")
     profile_rows = run_profile_posts()
-    write_to_sheet(
-        config["google_sheets"]["profile_tab"],
-        ["Run Date", "Profile URL", "Author", "Post Date",
-         "Post Text", "Post URL", "Comment Count", "Reactions", "Total Comments"],
-        profile_rows
-    )
+    if profile_rows:
+        write_to_sheet(
+            config["google_sheets"]["profile_tab"],
+            ["Run Date", "Profile URL", "Author", "Post Date",
+             "Post Text", "Post URL", "Comment Count", "Reactions", "Total Comments"],
+            profile_rows
+        )
+    else:
+        print("No profile rows to write.")
 
-    print("Done!")
+    print("=== Done! ===")
