@@ -158,26 +158,44 @@ def run_profile_posts():
             date_posted = post.get("date_posted", "")
             comments    = post.get("comments", [])
 
-            rows.append([
-                datetime.utcnow().strftime("%Y-%m-%d"),
-                profile_url,
-                author,
-                date_posted,
-                post_text[:500],
-                post_url,
-                len(comments),
-                post.get("total_reactions", 0),
-                post.get("total_comments", 0)
-            ])
+            if not comments:
+                sentiment, pain_point = analyse_sentiment(post_text)
+                rows.append([
+                    datetime.utcnow().strftime("%Y-%m-%d"),
+                    profile_url,
+                    author,
+                    date_posted,
+                    post_text[:500],
+                    post_url,
+                    "",
+                    sentiment,
+                    pain_point
+                ])
+            else:
+                for comment in comments:
+                    comment_text = comment.get("comment_text", "")
+                    if not comment_text:
+                        continue
+                    sentiment, pain_point = analyse_sentiment(comment_text)
+                    rows.append([
+                        datetime.utcnow().strftime("%Y-%m-%d"),
+                        profile_url,
+                        author,
+                        date_posted,
+                        post_text[:500],
+                        post_url,
+                        comment_text[:300],
+                        sentiment,
+                        pain_point
+                    ])
 
     return rows
 
 # ── Write to Sheets ───────────────────────────────────────────────────────────
 def write_to_sheet(tab_name, headers, rows):
     ws = get_sheet(tab_name)
-    existing = ws.get_all_values()
-    if not existing:
-        ws.append_row(headers, value_input_option="RAW")
+    ws.clear()
+    ws.append_row(headers, value_input_option="RAW")
     for row in rows:
         ws.append_row(row, value_input_option="RAW")
     print(f"Written {len(rows)} rows to '{tab_name}'")
@@ -204,7 +222,7 @@ if __name__ == "__main__":
         write_to_sheet(
             config["google_sheets"]["profile_tab"],
             ["Run Date", "Profile URL", "Author", "Post Date",
-             "Post Text", "Post URL", "Comment Count", "Reactions", "Total Comments"],
+             "Post Text", "Post URL", "Comment", "Sentiment", "Pain Point"],
             profile_rows
         )
     else:
