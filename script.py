@@ -23,6 +23,13 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+SHEET_HEADERS = [
+    "Run Date", "Keyword/Profile URL", "Post Author", "Post Date",
+    "Post URL", "Post Content", "Comment",
+    "Commenter Name", "Commenter Title", "Commenter Company",
+    "Sentiment", "Pain Point"
+]
+
 # ── Google Sheets setup ───────────────────────────────────────────────────────
 def get_sheet(tab_name):
     creds_dict = json.loads(GOOGLE_CREDS)
@@ -35,11 +42,11 @@ def get_sheet(tab_name):
     try:
         worksheet = sh.worksheet(tab_name)
     except gspread.exceptions.WorksheetNotFound:
-        worksheet = sh.add_worksheet(title=tab_name, rows="1000", cols="20")
+        worksheet = sh.add_worksheet(title=tab_name, rows="5000", cols="20")
     return worksheet
 
 # ── Sentiment via Claude ──────────────────────────────────────────────────────
-def analyse_sentiment(comment_text):
+def analyse_sentiment(text):
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     message = client.messages.create(
         model="claude-3-haiku-20240307",
@@ -53,13 +60,12 @@ def analyse_sentiment(comment_text):
                 f'  "sentiment": "positive" or "neutral" or "negative",\n'
                 f'  "pain_point": "one sentence summary of the complaint or null if none"\n'
                 f"}}\n\n"
-                f"Comment: {comment_text}"
+                f"Comment: {text}"
             )
         }]
     )
     try:
         raw = message.content[0].text.strip()
-        # Strip markdown code blocks if present
         raw = re.sub(r"```json|```", "", raw).strip()
         result = json.loads(raw)
         return result.get("sentiment", "neutral"), result.get("pain_point", "") or ""
@@ -67,6 +73,56 @@ def analyse_sentiment(comment_text):
         print(f"Sentiment analysis failed: {e}")
         print(f"Raw response was: {message.content[0].text[:200]}")
         return "neutral", ""
+
+# ── Extract commenter details ─────────────────────────────────────────────────
+def get_commenter_details(comment):
+    name    = comment.get("commenter_name", "") or ""
+    title   = comment.get("commenter_title", "") or ""
+    company = ""
+
+    # Company can be nested in employer or default_position
+    employer = comment.get("default_position_company_name", "")
+    if employer:
+        company = employer
+    else:
+        employers = comment.get("employer", [])
+        if employers and isinstance(employers, list):
+            # Get current employer (no end date)
+            for emp in employers:
+                if emp.get("end_date") is None:
+                    company = emp.get("company_name", "")
+                    break
+            if not company and employers:
+                company = employers[0].get("company_name", "")
+
+    return name, title, company
+
+# ── Build a row ───────────────────────────────────────────────────────────────
+def build_row(source, post, comment=None):
+    post_text   = post.get("text", "")
+    post_url    = post.get("share_url", "")
+    author      = post.get("actor_name", "")
+    date_posted = post.get("date_posted", "")
+    run_date    = datetime.utcnow().strftime("%Y-%m-%d")
+
+    if comment:
+        comment_text = comment.get("comment_text", "")
+        commenter_name, commenter_title, commenter_company = get_commenter_details(comment)
+        sentiment, pain_point = analyse_sentiment(comment_text)
+        return [
+            run_date, source, author, date_posted,
+            post_url, post_text[:500], comment_text[:300],
+            commenter_name, commenter_title, commenter_company,
+            sentiment, pain_point
+        ]
+    else:
+        sentiment, pain_point = analyse_sentiment(post_text)
+        return [
+            run_date, source, author, date_posted,
+            post_url, post_text[:500], "",
+            "", "", "",
+            sentiment, pain_point
+        ]
 
 # ── Use Case 2: Keyword search ────────────────────────────────────────────────
 def run_keyword_search():
@@ -93,42 +149,14 @@ def run_keyword_search():
     rows = []
 
     for post in posts:
-        post_text   = post.get("text", "")
-        post_url    = post.get("share_url", "")
-        author      = post.get("actor_name", "")
-        date_posted = post.get("date_posted", "")
-        comments    = post.get("comments", [])
-
+        comments = post.get("comments", [])
         if not comments:
-            sentiment, pain_point = analyse_sentiment(post_text)
-            rows.append([
-                datetime.utcnow().strftime("%Y-%m-%d"),
-                cfg["keyword"],
-                author,
-                date_posted,
-                post_text[:500],
-                post_url,
-                "",
-                sentiment,
-                pain_point
-            ])
+            rows.append(build_row(cfg["keyword"], post))
         else:
             for comment in comments:
-                comment_text = comment.get("comment_text", "")
-                if not comment_text:
+                if not comment.get("comment_text", ""):
                     continue
-                sentiment, pain_point = analyse_sentiment(comment_text)
-                rows.append([
-                    datetime.utcnow().strftime("%Y-%m-%d"),
-                    cfg["keyword"],
-                    author,
-                    date_posted,
-                    post_text[:500],
-                    post_url,
-                    comment_text[:300],
-                    sentiment,
-                    pain_point
-                ])
+                rows.append(build_row(cfg["keyword"], post, comment))
 
     return rows
 
@@ -158,61 +186,46 @@ def run_profile_posts():
         posts = response if isinstance(response, list) else response.get("posts", [])
 
         for post in posts:
-            post_text   = post.get("text", "")
-            post_url    = post.get("share_url", "")
-            author      = post.get("actor_name", "")
-            date_posted = post.get("date_posted", "")
-            comments    = post.get("comments", [])
-
+            comments = post.get("comments", [])
             if not comments:
-                sentiment, pain_point = analyse_sentiment(post_text)
-                rows.append([
-                    datetime.utcnow().strftime("%Y-%m-%d"),
-                    profile_url,
-                    author,
-                    date_posted,
-                    post_text[:500],
-                    post_url,
-                    "",
-                    sentiment,
-                    pain_point
-                ])
+                rows.append(build_row(profile_url, post))
             else:
                 for comment in comments:
-                    comment_text = comment.get("comment_text", "")
-                    if not comment_text:
+                    if not comment.get("comment_text", ""):
                         continue
-                    sentiment, pain_point = analyse_sentiment(comment_text)
-                    rows.append([
-                        datetime.utcnow().strftime("%Y-%m-%d"),
-                        profile_url,
-                        author,
-                        date_posted,
-                        post_text[:500],
-                        post_url,
-                        comment_text[:300],
-                        sentiment,
-                        pain_point
-                    ])
+                    rows.append(build_row(profile_url, post, comment))
 
     return rows
 
-# ── Write to Sheets (with rate limit handling) ────────────────────────────────
-def write_to_sheet(tab_name, headers, rows):
+# ── Write to Sheets ───────────────────────────────────────────────────────────
+def write_latest(tab_name, rows):
+    """Overwrite tab with today's data only."""
     ws = get_sheet(tab_name)
     ws.clear()
     time.sleep(1)
-    ws.append_row(headers, value_input_option="RAW")
-
-    # Write in batches of 10 rows with a pause between batches
+    ws.append_row(SHEET_HEADERS, value_input_option="RAW")
     batch_size = 10
     for i in range(0, len(rows), batch_size):
         batch = rows[i:i + batch_size]
         ws.append_rows(batch, value_input_option="RAW")
-        print(f"Written rows {i+1} to {i+len(batch)} of {len(rows)}")
-        time.sleep(2)  # pause to avoid hitting Google Sheets rate limit
+        print(f"  Latest: written rows {i+1}–{i+len(batch)} of {len(rows)}")
+        time.sleep(2)
+    print(f"✓ '{tab_name}' updated — {len(rows)} rows")
 
-    print(f"Done writing '{tab_name}' — {len(rows)} rows total")
+def write_archive(tab_name, rows):
+    """Append today's data to archive tab, never clear."""
+    ws = get_sheet(tab_name)
+    existing = ws.get_all_values()
+    if not existing:
+        ws.append_row(SHEET_HEADERS, value_input_option="RAW")
+        time.sleep(1)
+    batch_size = 10
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i:i + batch_size]
+        ws.append_rows(batch, value_input_option="RAW")
+        print(f"  Archive: written rows {i+1}–{i+len(batch)} of {len(rows)}")
+        time.sleep(2)
+    print(f"✓ '{tab_name}' updated — {len(rows)} rows appended")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -220,12 +233,8 @@ if __name__ == "__main__":
     print("=== Use Case 2: Keyword Intel ===")
     keyword_rows = run_keyword_search()
     if keyword_rows:
-        write_to_sheet(
-            config["google_sheets"]["keyword_tab"],
-            ["Run Date", "Keyword", "Post Author", "Post Date",
-             "Post Text", "Post URL", "Comment", "Sentiment", "Pain Point"],
-            keyword_rows
-        )
+        write_latest(config["google_sheets"]["keyword_tab"], keyword_rows)
+        write_archive(config["google_sheets"]["keyword_archive_tab"], keyword_rows)
     else:
         print("No keyword rows to write.")
 
@@ -233,12 +242,8 @@ if __name__ == "__main__":
     print("=== Use Case 1: Profile Posts ===")
     profile_rows = run_profile_posts()
     if profile_rows:
-        write_to_sheet(
-            config["google_sheets"]["profile_tab"],
-            ["Run Date", "Profile URL", "Author", "Post Date",
-             "Post Text", "Post URL", "Comment", "Sentiment", "Pain Point"],
-            profile_rows
-        )
+        write_latest(config["google_sheets"]["profile_tab"], profile_rows)
+        write_archive(config["google_sheets"]["profile_archive_tab"], profile_rows)
     else:
         print("No profile rows to write.")
 
