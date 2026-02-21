@@ -30,6 +30,22 @@ SHEET_HEADERS = [
     "Sentiment", "Pain Point"
 ]
 
+# ── Hiring post filter ────────────────────────────────────────────────────────
+HIRING_SIGNALS = [
+    "hiring", "#hiring", "we're hiring", "we are hiring", "now hiring",
+    "job opening", "job opportunity", "open position", "open role",
+    "looking for a", "we're looking for", "we are looking for",
+    "join our team", "join us", "come work with us",
+    "apply now", "apply below", "apply here",
+    "send your cv", "send your resume",
+    "careers at", "career opportunity",
+    "know anyone", "tag someone", "refer a friend"
+]
+
+def is_hiring_post(text):
+    text_lower = text.lower()
+    return any(signal in text_lower for signal in HIRING_SIGNALS)
+
 # ── Google Sheets setup ───────────────────────────────────────────────────────
 def get_sheet(tab_name):
     creds_dict = json.loads(GOOGLE_CREDS)
@@ -163,7 +179,8 @@ def run_keyword_search(keywords):
             "date_posted": cfg["date_posted"],
             "limit": cfg["max_posts"],
             "fields": "comments",
-            "max_comments": cfg["max_comments"]
+            "max_comments": cfg["max_comments"],
+            "content_type": ["photos", "videos", "documents"]  # excludes jobs at API level
         }
         resp = requests.post(
             "https://api.crustdata.com/screener/linkedin_posts/keyword_search/",
@@ -176,8 +193,17 @@ def run_keyword_search(keywords):
 
         response = resp.json()
         posts = response if isinstance(response, list) else response.get("posts", [])
+        skipped = 0
 
         for post in posts:
+            post_text = post.get("text", "")
+
+            # Layer 2: text-level hiring filter
+            if is_hiring_post(post_text):
+                print(f"  Skipping hiring post: {post_text[:80]}...")
+                skipped += 1
+                continue
+
             comments = post.get("comments", [])
             if not comments:
                 all_rows.append(build_row(keyword, post, keyword))
@@ -187,7 +213,7 @@ def run_keyword_search(keywords):
                         continue
                     all_rows.append(build_row(keyword, post, keyword, comment))
 
-        print(f"  Got {len(posts)} posts for '{keyword}'")
+        print(f"  Got {len(posts)} posts for '{keyword}' — skipped {skipped} hiring posts")
 
     return all_rows
 
@@ -216,8 +242,17 @@ def run_profile_posts(profiles):
 
         response = resp.json()
         posts = response if isinstance(response, list) else response.get("posts", [])
+        skipped = 0
 
         for post in posts:
+            post_text = post.get("text", "")
+
+            # Layer 2: text-level hiring filter
+            if is_hiring_post(post_text):
+                print(f"  Skipping hiring post: {post_text[:80]}...")
+                skipped += 1
+                continue
+
             comments = post.get("comments", [])
             if not comments:
                 rows.append(build_row(profile_url, post))
@@ -227,7 +262,7 @@ def run_profile_posts(profiles):
                         continue
                     rows.append(build_row(profile_url, post, "", comment))
 
-        print(f"  Got {len(posts)} posts for {profile_url}")
+        print(f"  Got {len(posts)} posts for {profile_url} — skipped {skipped} hiring posts")
 
     return rows
 
